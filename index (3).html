@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Duck Hunt - NES Retro Edition</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Google Press Start 2P untuk nuansa 8-bit -->
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        * {
+            font-family: 'Press Start 2P', cursive, monospace;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        body {
+            background-color: #000;
+            margin: 0;
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Styling kursor crosshair Zapper */
+        .game-container {
+            position: relative;
+            cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><circle cx="16" cy="16" r="10" fill="none" stroke="%23ff0000" stroke-width="2"/><line x1="16" y1="0" x2="16" y2="32" stroke="%23ff0000" stroke-width="2"/><line x1="0" y1="16" x2="32" y2="16" stroke="%23ff0000" stroke-width="2"/><circle cx="16" cy="16" r="2" fill="%23ff0000"/></svg>') 16 16, stroke;
+        }
+
+        /* Animasi Flash Zapper NES */
+        .flash {
+            animation: flash-animation 0.08s ease-out;
+        }
+
+        @keyframes flash-animation {
+            0% { background-color: #fff; opacity: 0.9; }
+            100% { background-color: transparent; opacity: 1; }
+        }
+
+        /* Pixelated Rendering untuk Canvas */
+        canvas {
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+        }
+    </style>
+</head>
+<body class="bg-black text-white select-none">
+
+    <div class="game-container relative flex flex-col items-center justify-center p-2">
+        <!-- Frame Game retro TV CRT -->
+        <div class="relative border-8 border-gray-800 rounded-lg overflow-hidden shadow-2xl bg-black">
+            
+            <!-- Canvas Utama Game -->
+            <canvas id="gameCanvas" width="640" height="480" class="block bg-[#64b0ff]"></canvas>
+
+            <!-- Layer Efek Flash Tembakan -->
+            <div id="flashOverlay" class="absolute inset-0 pointer-events-none"></div>
+
+            <!-- Overlay Layar Mulai / Game Over -->
+            <div id="menuOverlay" class="absolute inset-0 bg-black/80 flex flex-col items-center justify-center p-6 text-center z-10">
+                <h1 id="menuTitle" class="text-3xl md:text-4xl text-red-500 mb-4 tracking-wider leading-relaxed">DUCK HUNT</h1>
+                <p id="menuSubtitle" class="text-xs md:text-sm text-yellow-400 mb-8 leading-loose">RETRO NES EDITION</p>
+                
+                <div id="scoreBoard" class="hidden mb-6 text-sm text-green-400">
+                    <p class="mb-2">SKOR AKHIR: <span id="finalScore">0</span></p>
+                    <p>REKOR TERTINGGI: <span id="highScore">0</span></p>
+                </div>
+
+                <button id="startBtn" class="px-6 py-4 bg-red-600 hover:bg-red-500 text-white border-4 border-white text-sm md:text-base rounded active:translate-y-1 transition-all">
+                    MULAI MAIN
+                </button>
+                
+                <p class="mt-8 text-[10px] text-gray-400">KLIK BEBEK UNTUK MENEMBAK • JANGAN KEHABISAN PELURU</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * DUCK HUNT NES RETRO - HTML5 Canvas & Web Audio API
+         */
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const flashOverlay = document.getElementById('flashOverlay');
+        const menuOverlay = document.getElementById('menuOverlay');
+        const menuTitle = document.getElementById('menuTitle');
+        const menuSubtitle = document.getElementById('menuSubtitle');
+        const startBtn = document.getElementById('startBtn');
+        const scoreBoard = document.getElementById('scoreBoard');
+        const finalScoreEl = document.getElementById('finalScore');
+        const highScoreEl = document.getElementById('highScore');
+
+        // Context Suara Web Audio API
+        let audioCtx = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
+        // Efek Suara Sintetis Retro NES
+        const SoundFX = {
+            shoot() {
+                if (!audioCtx) return;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.15);
+                
+                gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+                
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.15);
+            },
+            
+            quack() {
+                if (!audioCtx) return;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+                osc.frequency.setValueAtTime(220, audioCtx.currentTime + 0.05);
+                osc.frequency.setValueAtTime(150, audioCtx.currentTime + 0.1);
+                
+                gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+                
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.15);
+            },
+
+            hit() {
+                if (!audioCtx) return;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(523.25, audioCtx.currentTime); // C5
+                osc.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.08); // E5
+                osc.frequency.setValueAtTime(783.99, audioCtx.currentTime + 0.16); // G5
+                
+                gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
+                
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.25);
+            },
+
+            dogLaugh() {
+                if (!audioCtx) return;
+                let now = audioCtx.currentTime;
+                for (let i = 0; i < 3; i++) {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(300, now + i * 0.1);
+                    osc.frequency.exponentialRampToValueAtTime(450, now + i * 0.1 + 0.08);
+                    
+                    gain.gain.setValueAtTime(0.15, now + i * 0.1);
+                    gain.gain.linearRampToValueAtTime(0.01, now + i * 0.1 + 0.08);
+                    
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start(now + i * 0.1);
+                    osc.stop(now + i * 0.1 + 0.08);
+                }
+            },
+
+            roundStart() {
+                if (!audioCtx) return;
+                const now = audioCtx.currentTime;
+                const notes = [261.63, 329.63, 392.00, 523.25];
+                notes.forEach((freq, idx) => {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(freq, now + idx * 0.1);
+                    gain.gain.setValueAtTime(0.15, now + idx * 0.1);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + idx * 0.1 + 0.09);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start(now + idx * 0.1);
+                    osc.stop(now + idx * 0.1 + 0.09);
+                });
+            }
+        };
+
+        // State Game Utama
+        const gameState = {
+            status: 'MENU', // MENU, STARTING, PLAYING, ROUND_OVER, GAME_OVER
+            score: 0,
+            highScore: localStorage.getItem('duckhunt_highscore') || 0,
+            round: 1,
+            ammo: 3,
+            ducksPerRound: 10,
+            ducksShotInRound: 0,
+            currentDuckIndex: 0,
+            duckHistory: [], // 'hit', 'miss', 'pending'
+            roundTimer: 0
+        };
+
+        // Entitas Anjing (Dog)
+        const dog = {
+            x: 280,
+            y: 350,
+            targetY: 350,
+            state: 'HIDDEN', // HIDDEN, LAUGH, HOLD_DUCK, SNIFFING
+            timer: 0,
+            ducksCaught: 1,
+
+            draw() {
+                if (this.state === 'HIDDEN') return;
+
+                ctx.save();
+                ctx.translate(this.x, this.y);
+
+                if (this.state === 'LAUGH') {
+                    // Tubuh Anjing Tertawa (Cokelat)
+                    ctx.fillStyle = '#8B4513';
+                    ctx.fillRect(-20, -40, 40, 40);
+                    // Kepala
+                    ctx.fillRect(-15, -60, 30, 25);
+                    // Telinga
+                    ctx.fillStyle = '#4A235A';
+                    ctx.fillRect(-22, -58, 8, 20);
+                    ctx.fillRect(14, -58, 8, 20);
+                    // Wajah & Mulut Terbuka Tertawa
+                    ctx.fillStyle = '#D2B48C';
+                    ctx.fillRect(-10, -50, 20, 15);
+                    ctx.fillStyle = '#000';
+                    ctx.fillRect(-6, -45, 12, 8); // Mulut terbuka
+                    ctx.fillStyle = '#FF0000';
+                    ctx.fillRect(-4, -42, 8, 4);  // Lidah
+                    // Mata Tertutup (Ketawa)
+                    ctx.fillStyle = '#000';
+                    ctx.fillRect(-10, -55, 6, 2);
+                    ctx.fillRect(4, -55, 6, 2);
+                } else if (this.state === 'HOLD_DUCK') {
+                    // Anjing Memegang Bebek Hasil Tembakan
+                    ctx.fillStyle = '#8B4513';
+                    ctx.fillRect(-20, -45, 40, 45);
+                    // Kepala
+                    ctx.fillRect(-15, -65, 30, 25);
+                    // Telinga
+                    ctx.fillStyle = '#5C2C06';
+                    ctx.fillRect(-22, -63, 8, 20);
+                    ctx.fillRect(14, -63, 8, 20);
+                    // Mata Bangga
+                    ctx.fillStyle = '#FFF';
+                    ctx.fillRect(-10, -60, 6, 6);
+                    ctx.fillRect(4, -60, 6, 6);
+                    ctx.fillStyle = '#000';
+                    ctx.fillRect(-8, -58, 3, 3);
+                    ctx.fillRect(6, -58, 3, 3);
+
+                    // Gambar Bebek Mati di Tangan Anjing
+                    ctx.fillStyle = '#008000'; // Kepala Bebek Hijau
+                    ctx.fillRect(-18, -48, 12, 12);
+                    ctx.fillStyle = '#8B4513'; // Badan Bebek Cokelat
+                    ctx.fillRect(-14, -40, 16, 12);
+                    ctx.fillStyle = '#FFA500'; // Paruh
+                    ctx.fillRect(-22, -45, 6, 4);
+
+                    if (this.ducksCaught > 1) {
+                        // Bebek Kedua jika dapet 2 bebek
+                        ctx.fillStyle = '#008000';
+                        ctx.fillRect(6, -48, 12, 12);
+                        ctx.fillStyle = '#8B4513';
+                        ctx.fillRect(-2, -40, 16, 12);
+                        ctx.fillStyle = '#FFA500';
+                        ctx.fillRect(16, -45, 6, 4);
+                    }
+                }
+                ctx.restore();
+            },
+
+            update() {
+                if (this.state === 'HIDDEN') return;
+
+                // Gerakan naik turun anjing di balik semak
+                if (this.timer > 0) {
+                    this.timer--;
+                    if (this.y > this.targetY) {
+                        this.y -= 4;
+                    }
+                } else {
+                    if (this.y < 350) {
+                        this.y += 4;
+                    } else {
+                        this.state = 'HIDDEN';
+                    }
+                }
+            },
+
+            popup(type, count = 1) {
+                this.state = type;
+                this.ducksCaught = count;
+                this.x = 280 + (Math.random() * 80 - 40);
+                this.y = 350;
+                this.targetY = 280;
+                this.timer = 70; // Durasi muncul di layar
+                if (type === 'LAUGH') {
+                    SoundFX.dogLaugh();
+                }
+            }
+        };
+
+        // Entitas Bebek (Duck)
+        class Duck {
+            constructor() {
+                this.reset();
+            }
+
+            reset() {
+                this.x = Math.random() * (canvas.width - 120) + 60;
+                this.y = 300;
+                this.width = 40;
+                this.height = 40;
+                
+                // Kecepatan meningkat seiring naiknya Round
+                const baseSpeed = 2.5 + (gameState.round * 0.6);
+                const angle = (Math.random() * Math.PI / 3) + Math.PI / 6; // Terbang ke atas
+                
+                this.vx = Math.cos(angle) * baseSpeed * (Math.random() > 0.5 ? 1 : -1);
+                this.vy = -Math.sin(angle) * baseSpeed;
+                
+                this.state = 'FLYING'; // FLYING, SHOT, FALLING, ESCAPED
+                this.frame = 0;
+                this.animTimer = 0;
+                this.quackTimer = Math.floor(Math.random() * 40) + 20;
+                this.flyTimer = 0;
+                this.maxFlyTime = 240; // Batas waktu terbang sebelum kabur (sekitar 4 detik)
+                
+                // Variasi Warna Bebek Retro (Hijau/Hitam/Merah)
+                const types = [
+                    { head: '#008700', body: '#9c4a00', wing: '#e45c00' }, // Standard Green
+                    { head: '#0050b0', body: '#747474', wing: '#fc9838' }, // Blue Duck
+                    { head: '#a81000', body: '#fc9838', wing: '#000000' }  // Red Duck (Fast)
+                ];
+                this.colors = types[Math.floor(Math.random() * types.length)];
+            }
+
+            draw() {
+                if (this.state === 'ESCAPED') return;
+
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                
+                // Balik Sprite tergantung arah terbang
+                if (this.vx < 0 && this.state === 'FLYING') {
+                    ctx.scale(-1, 1);
+                }
+
+                if (this.state === 'SHOT') {
+                    // Efek saat tertembak (Kaget/Mata X)
+                    ctx.fillStyle = '#FFFFFF';
+                    ctx.fillRect(-20, -20, 40, 40);
+                    ctx.fillStyle = '#FF0000';
+                    ctx.font = '16px "Press Start 2P"';
+                    ctx.fillText('HIT!', -16, 5);
+                } 
+                else if (this.state === 'FALLING') {
+                    // Bebek Jatuh Memutar
+                    ctx.rotate(Math.PI / 2);
+                    this.drawDuckBody(0);
+                } 
+                else {
+                    // Animasi Terbang (Kepakan Sayap 3 Frame)
+                    this.drawDuckBody(this.frame);
+                }
+
+                ctx.restore();
+            }
+
+            drawDuckBody(frame) {
+                // Paruh Kuning
+                ctx.fillStyle = '#fc9838';
+                ctx.fillRect(10, -6, 10, 6);
+
+                // Kepala Bebek
+                ctx.fillStyle = this.colors.head;
+                ctx.fillRect(-4, -14, 16, 14);
+
+                // Mata
+                ctx.fillStyle = '#FFFFFF';
+                ctx.fillRect(4, -12, 4, 4);
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(6, -10, 2, 2);
+
+                // Leher Putih
+                ctx.fillStyle = '#FFFFFF';
+                ctx.fillRect(-6, -2, 16, 3);
+
+                // Badan
+                ctx.fillStyle = this.colors.body;
+                ctx.fillRect(-18, 0, 24, 16);
+
+                // Sayap (Animasi kepakan)
+                ctx.fillStyle = this.colors.wing;
+                if (frame === 0) {
+                    // Sayap di Atas
+                    ctx.fillRect(-12, -14, 12, 14);
+                } else if (frame === 1) {
+                    // Sayap Mendatar
+                    ctx.fillRect(-14, 2, 16, 8);
+                } else {
+                    // Sayap di Bawah
+                    ctx.fillRect(-12, 8, 12, 12);
+                }
+
+                // Ekor
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(-24, 2, 6, 8);
+            }
+
+            update() {
+                if (this.state === 'FLYING') {
+                    this.x += this.vx;
+                    this.y += this.vy;
+
+                    // Pantulan pada Batas Dinding Atas & Samping Canvas
+                    if (this.x < 30 || this.x > canvas.width - 30) {
+                        this.vx *= -1;
+                    }
+                    if (this.y < 30) {
+                        this.vy *= -1;
+                    }
+                    // Jangan biarkan terlalu dekat ke tanah saat terbang
+                    if (this.y > 270) {
+                        this.vy = -Math.abs(this.vy);
+                    }
+
+                    // Timer Kepakan Sayap
+                    this.animTimer++;
+                    if (this.animTimer % 6 === 0) {
+                        this.frame = (this.frame + 1) % 3;
+                    }
+
+                    // Suara Kwek Bebek
+                    this.quackTimer--;
+                    if (this.quackTimer <= 0) {
+                        SoundFX.quack();
+                        this.quackTimer = Math.floor(Math.random() * 80) + 40;
+                    }
+
+                    // Batas waktu terbang di layar
+                    this.flyTimer++;
+                    if (this.flyTimer > this.maxFlyTime || gameState.ammo <= 0) {
+                        this.state = 'ESCAPING';
+                    }
+                } 
+                else if (this.state === 'ESCAPING') {
+                    // Bebek Kabur lurus ke atas dengan cepat
+                    this.vy = -6;
+                    this.y += this.vy;
+                    if (this.y < -50) {
+                        this.state = 'ESCAPED';
+                    }
+                }
+                else if (this.state === 'SHOT') {
+                    // Jeda sebentar saat tertembak
+                    this.animTimer++;
+                    if (this.animTimer > 15) {
+                        this.state = 'FALLING';
+                    }
+                } 
+                else if (this.state === 'FALLING') {
+                    this.y += 7; // Jatuh ke bawah
+                    if (this.y > 310) {
+                        this.state = 'DEAD';
+                    }
+                }
+            }
+
+            isHit(hx, hy) {
+                // Deteksi Hitbox Bebek
+                return (
+                    hx >= this.x - 25 &&
+                    hx <= this.x + 25 &&
+                    hy >= this.y - 25 &&
+                    hy <= this.y + 25
+                );
+            }
+        }
+
+        let activeDuck = null;
+
+        // Render Latar Belakang Retro (Pohon, Semak & Rumput)
+        function drawBackground() {
+            // Langit Biru NES (Berubah kemerahan jika bebek kabur)
+            ctx.fillStyle = (activeDuck && activeDuck.state === 'ESCAPING') ? '#fcb4b4' : '#64b0ff';
+            ctx.fillRect(0, 0, canvas.width, 360);
+
+            // Pohon Besar di Kiri
+            ctx.fillStyle = '#005800'; // Daun Pohon Tua
+            ctx.beginPath();
+            ctx.arc(90, 190, 65, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#008700'; // Daun Pohon Muda
+            ctx.beginPath();
+            ctx.arc(80, 180, 50, 0, Math.PI * 2);
+            ctx.fill();
+            // Batang Pohon
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(80, 230, 20, 100);
+
+            // Semak Kanan
+            ctx.fillStyle = '#008700';
+            ctx.beginPath();
+            ctx.arc(520, 270, 45, 0, Math.PI * 2);
+            ctx.arc(570, 260, 55, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Tanah & Rumput Hijau Utama
+            ctx.fillStyle = '#00a800';
+            ctx.fillRect(0, 310, canvas.width, 50);
+
+            // Garis Detail Rumput
+            ctx.fillStyle = '#80d010';
+            ctx.fillRect(0, 310, canvas.width, 6);
+        }
+
+        // Render Panel Kontrol / HUD di Bagian Bawah Layar
+        function drawHUD() {
+            // Area Hitam HUD Bawah
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 360, canvas.width, 120);
+
+            // Border Hitam Kotak-Kotak UI
+            ctx.strokeStyle = '#00a800';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(20, 375, 130, 85);  // Ammo Box
+            ctx.strokeRect(180, 375, 280, 85); // Hit/Duck Tracker
+            ctx.strokeRect(480, 375, 140, 85); // Score & Round Box
+
+            // 1. Tampilan Sisa Peluru (SHOT)
+            ctx.fillStyle = '#00a800';
+            ctx.font = '12px "Press Start 2P"';
+            ctx.fillText('SHOT', 35, 398);
+
+            // Icon Peluru NES
+            for (let i = 0; i < 3; i++) {
+                if (i < gameState.ammo) {
+                    ctx.fillStyle = '#fc9838'; // Warna Peluru Aktif
+                    ctx.fillRect(40 + (i * 25), 415, 12, 22);
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(43 + (i * 25), 415, 6, 6);
+                }
+            }
+
+            // 2. Tracker Bebek Hit/Miss (HIT TRACKER)
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '12px "Press Start 2P"';
+            ctx.fillText('HIT', 195, 435);
+
+            // 10 Ikon Bebek di Panel Bawah
+            for (let i = 0; i < 10; i++) {
+                const xPos = 245 + (i * 20);
+                const yPos = 422;
+                const status = gameState.duckHistory[i];
+
+                if (status === 'hit') {
+                    ctx.fillStyle = '#FF0000'; // Merah = Hit
+                } else if (status === 'miss') {
+                    ctx.fillStyle = '#FFFFFF'; // Putih = Miss
+                } else {
+                    ctx.fillStyle = '#747474'; // Abu-abu = Belum
+                }
+
+                // Icon Bebek Mini UI
+                ctx.fillRect(xPos, yPos, 14, 12);
+                if (status === 'hit' && Math.floor(Date.now() / 250) % 2 === 0) {
+                    ctx.fillStyle = '#FFFF00'; // Efek Berkedip saat Hit
+                    ctx.fillRect(xPos + 2, yPos + 2, 10, 8);
+                }
+            }
+
+            // 3. Skor & Round
+            ctx.fillStyle = '#00a800';
+            ctx.fillText('R=' + gameState.round, 500, 398);
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '12px "Press Start 2P"';
+            const scoreStr = String(gameState.score).padStart(6, '0');
+            ctx.fillText(scoreStr, 495, 435);
+        }
+
+        // Jalankan Gelombang Bebek Baru
+        function spawnDuck() {
+            if (gameState.currentDuckIndex >= gameState.ducksPerRound) {
+                endRound();
+                return;
+            }
+
+            gameState.ammo = 3;
+            activeDuck = new Duck();
+            gameState.status = 'PLAYING';
+        }
+
+        // Proses Menembak Zapper
+        function handleShoot(e) {
+            if (gameState.status !== 'PLAYING' || !activeDuck) return;
+            if (gameState.ammo <= 0) return;
+
+            // Efek Suara & Visual Flash Layar
+            initAudio();
+            SoundFX.shoot();
+            
+            flashOverlay.classList.add('flash');
+            setTimeout(() => flashOverlay.classList.remove('flash'), 80);
+
+            gameState.ammo--;
+
+            const rect = canvas.getBoundingClientRect();
+            const clickX = (e.clientX - rect.left) * (canvas.width / rect.width);
+            const clickY = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+            // Cek Hit Bebek
+            if (activeDuck.state === 'FLYING' && activeDuck.isHit(clickX, clickY)) {
+                activeDuck.state = 'SHOT';
+                activeDuck.animTimer = 0;
+                SoundFX.hit();
+
+                gameState.score += 500 + (gameState.round * 100);
+                gameState.ducksShotInRound++;
+                gameState.duckHistory[gameState.currentDuckIndex] = 'hit';
+
+                // Tampilkan Anjing Bawa Bebek setelah jatuh
+                setTimeout(() => {
+                    dog.popup('HOLD_DUCK', 1);
+                    nextDuck();
+                }, 1200);
+            } else if (gameState.ammo === 0 && activeDuck.state === 'FLYING') {
+                // Kehabisan Peluru
+                activeDuck.state = 'ESCAPING';
+            }
+        }
+
+        function nextDuck() {
+            gameState.currentDuckIndex++;
+            setTimeout(() => {
+                if (gameState.status !== 'GAME_OVER') {
+                    spawnDuck();
+                }
+            }, 1000);
+        }
+
+        // Evaluasi Akhir Ronde
+        function endRound() {
+            gameState.status = 'ROUND_OVER';
+
+            // Syarat Minimal 6 Bebek Tertembak untuk Lolos ke Round Berikutnya
+            if (gameState.ducksShotInRound >= 6) {
+                gameState.round++;
+                setTimeout(() => {
+                    startNextRound();
+                }, 2000);
+            } else {
+                // Game Over jika kurang dari 6
+                gameOver();
+            }
+        }
+
+        function startNextRound() {
+            gameState.currentDuckIndex = 0;
+            gameState.ducksShotInRound = 0;
+            gameState.duckHistory = Array(10).fill('pending');
+            SoundFX.roundStart();
+            spawnDuck();
+        }
+
+        function startGame() {
+            initAudio();
+            gameState.score = 0;
+            gameState.round = 1;
+            gameState.currentDuckIndex = 0;
+            gameState.ducksShotInRound = 0;
+            gameState.duckHistory = Array(10).fill('pending');
+            
+            menuOverlay.classList.add('hidden');
+            SoundFX.roundStart();
+            spawnDuck();
+        }
+
+        function gameOver() {
+            gameState.status = 'GAME_OVER';
+            if (gameState.score > gameState.highScore) {
+                gameState.highScore = gameState.score;
+                localStorage.setItem('duckhunt_highscore', gameState.highScore);
+            }
+
+            menuTitle.textContent = "GAME OVER";
+            menuTitle.className = "text-3xl md:text-4xl text-red-600 mb-4 tracking-wider";
+            menuSubtitle.textContent = `KAMU HANYA MENEMBAK ${gameState.ducksShotInRound}/10 BEBEK`;
+            
+            finalScoreEl.textContent = gameState.score;
+            highScoreEl.textContent = gameState.highScore;
+            scoreBoard.classList.remove('hidden');
+
+            startBtn.textContent = "MAIN LAGI";
+            menuOverlay.classList.remove('hidden');
+        }
+
+        // Loop Game Utama (Update & Render)
+        function gameLoop() {
+            // 1. Clear Screen
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 2. Render Latar Belakang
+            drawBackground();
+
+            // 3. Update & Render Bebek
+            if (activeDuck) {
+                activeDuck.update();
+                activeDuck.draw();
+
+                // Handler jika Bebek Berhasil Kabur
+                if (activeDuck.state === 'ESCAPED' && gameState.status === 'PLAYING') {
+                    gameState.duckHistory[gameState.currentDuckIndex] = 'miss';
+                    gameState.status = 'DOG_ANIM';
+                    dog.popup('LAUGH');
+                    nextDuck();
+                }
+            }
+
+            // 4. Update & Render Anjing di Depan Bebek Tapi di Belakang Rumput Depan
+            dog.update();
+            dog.draw();
+
+            // 5. Render Canvas HUD Bawah
+            drawHUD();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Event Listeners
+        canvas.addEventListener('mousedown', handleShoot);
+        startBtn.addEventListener('click', startGame);
+
+        // Inisialisasi awal saat window dimuat
+        window.onload = () => {
+            gameLoop();
+        };
+    </script>
+</body>
+</html>
